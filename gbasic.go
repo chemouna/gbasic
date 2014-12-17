@@ -13,7 +13,7 @@ import(
     "strings"
     "unicode"
 	"bufio"
-	"strconv""
+	"strconv"
 )
 
 func usage() {
@@ -38,7 +38,7 @@ func NewGbasic() *Gbasic {
     g := new(Gbasic)
     g.variables = make(map[string]Value)
     g.labels = make(map[string]int)
-	g.lineInReader = bufio.NewScanner(os.Stdin)
+	g.lineInScanner = bufio.NewScanner(os.Stdin)
     return g
 }
 
@@ -243,20 +243,43 @@ func (p Parser) parse(labels map[string]int) []Statement {
             value := p.expression()
             statements = append(statements, AssignmentStatement{name, value})
         } else if p.matchByName("print") {
-			statements = statements.append(PrintStatement(p.expression()))
+			statements = statements.append(PrintStatement{p.expression()})
 		} else if p.matchByName("input") {
-			statements = statements.append(InputStatement(
-				consume(WORD).text,
-			))
+			statements = statements.append(InputStatement{p.consume(WORD).text})
 		} else if p.matchByName("goto") {
-
+			statements = statements.append(GotoStatement{p.consume(WORD).text})
 		} else if p.matchByName("if") {
-
+			condition := p.expression()
+			p.consumeByName("then")
+			label := p.consumeByType(WORD).text
+			statements = statements.append(IfThenStatement{condition, label})
 		} else {
 			break
 		}
     }
 	return statements
+}
+
+/**
+ * Consumes the next token if it's the given type. If not, throws an
+ * exception. This is for cases where the parser demands a token of a
+ * certain type in a certain position, for example a matching ) after
+ * an opening (.
+ */
+func (p Parser) consumeByType(type1 TokenType) Token {
+	if p.get(0).tokenType != type1 {
+		//throw new Error("Expected " + type + ".")
+		panic(" Expected "+ type1 + ".")
+	}
+	p.position++
+	return p.tokens.get(p.position)
+}
+
+func (p Parser) consumeByName(name string) Token {
+	if !p.match(name) {
+		panic("Expected " + name + ".")
+	}
+	return p.last(1)
 }
 
 /**
@@ -347,7 +370,12 @@ func (p Parser) operator() Expression {
     expression := p.atomic()
 
     // Keep building operator expressions as long as we have operators.
-    
+    for p.matchByType(OPERATOR) || p.matchByType(EQUALS) {
+		operator := p.last(1).text[1] //not sure that this will get me equivalent to charAt(0)
+		right := p.atomic()
+		expression = OperatorExpression{expression, operator, right}
+	}
+	return expression
 }
 
  /**
@@ -356,8 +384,91 @@ func (p Parser) operator() Expression {
  * well as parenthesized expressions. 
  **/
 func (p Parser) atomic() Expression {
+	if p.matchByType(WORD) {
+		return VariableExpression{p.last(1).text}
+	} else if p.matchByType(NUMBER) {
+		return NumberValue{strconv.ParseFloat(p.last(1).text, 64)}
+	} else if p.matchByType(STRING) {
+		return StringValue{p.last(1).text}
+	} else if p.matchByType(LEFT_PAREN) {
+		expression := p.expression()
+		p.consumeByType(RIGHT_PAREN)
+		return expression
+	}
+	panic(" Couldn't parse this expression ")
+}
 
-}   
+/**
+ * An operator expression evaluates two expressions and performs an arithmetic
+ * operationon the results
+ */
+type OperatorExpression struct {
+	left Expression
+	operator rune
+	right Expression
+}
+
+func (oe OperatorExpression) evaluate() Value {
+	leftVal := oe.left.evaluate()
+	rightVal := oe.right.evaluate()
+
+	switch (oe.operator){
+	case '=':
+		if _, ok := leftVal.(NumberValue); ok {
+			if leftVal.toNumber() == rightVal.toNumber() {
+				return NumberValue{1}
+			} else {
+				return NumberValue{0}
+			}
+		}
+	case '+':
+		// Addition if the left argument is a number, otherwise do
+		// string concatenation.
+		if _, ok := leftVal.(NumberValue); ok {
+			return NumberValue{leftVal.toNumber() +  rightVal.toNumber()}
+		} else {
+			return NumberValue{leftVal.toString() +  rightVal.toString()}
+		}
+	case '-':
+		return NumberValue{leftVal.toNumber() - rightVal.toNumber()}
+	case '*':
+		return NumberValue{leftVal.toNumber() * rightVal.toNumber()}
+	case '\':
+		return NumberValue{leftVal.toNumber() / rightVal.toNumber()}
+	case '<':
+		//compare depending on the type
+		if _, ok := leftVal.(NumberValue); ok {
+			if leftVal.toNumber() < rightVal.toNumber() {
+				return NumberValue{1}
+			} else {
+				return NumberValue{0}
+			}
+		} else {
+			if leftVal.toString() < rightVal.toString() {
+				return NumberValue{1}
+			} else {
+				return NumberValue{0}
+			}
+		}
+	case '>':
+	 	//coerce on left's arg type, then compare
+		if _, ok := leftVal.(NumberValue); ok {
+			if leftVal.toNumber() > rightVal.toNumber() {
+				return NumberValue{1}
+			} else {
+				return NumberValue{0}
+			}
+		} else {
+			if leftVal.toString() > rightVal.toString() {
+				return NumberValue{1}
+			} else {
+				return NumberValue{0}
+			}
+		}
+	}
+	panic(" Unknown operator")
+}
+
 //----
 
  /**
@@ -383,6 +494,30 @@ func (ps PrintStatement) execute() {
 
 type InputStatement struct {
 	name string
+}
+
+type GotoStatement struct {
+	label string
+}
+
+type IfThenStatement struct {
+	condition Expression
+	label string
+}
+
+func (gs GotoStatement) execute() {
+	if val, ok := gBasic.labels[gs.label]; ok {
+		gBasic.currentStatement = val
+	}
+}
+
+func (its IfThenStatement) execute() {
+	if val, ok := gBasic.labels[its.label]; ok {
+		fval := its.condition.evaluate().toNumber()
+		if fval != 0 {
+			gBasic.currentStatement = val
+		}
+	}
 }
 
 func (is InputStatement) execute() {
@@ -429,8 +564,19 @@ func (sv StringValue) toNumber() float64 {
 	return v
 }
 
-func (sv StringValue) evaluate() {
+func (sv StringValue) evaluate() Value {
 	return sv
+}
+
+type VariableExpression struct {
+	name string
+}
+
+func (ve VariableExpression) evaluate() Value {
+	if ok, val := gBasic.variables[ve.name]; ok {
+		return val
+	}
+	return NumberValue{0} //not sure to by default return nb 0 ?
 }
 
 type Statement interface {
