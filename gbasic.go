@@ -50,7 +50,7 @@ func (g *Gbasic) interpret(src string) {
 
     parser := Parser{tokens, 0}
 
-	statements := parser.parse(g.labels);
+	statements := parser.parse(&g.labels);
 
 	//Interpret all statement until we're done
 	g.currentStatement = 0
@@ -107,20 +107,25 @@ func tokenize(source string) []Token {
 		c := rune(source[i])
 		//fmt.Printf(" in source range for loop current i = %d \n", i)
         switch (state) {
-            case DEFAULT_STATE:
-                //check if c is in charTokens   
+		case DEFAULT_STATE:
+                //check if c is in charTokens
                 if strings.ContainsRune(charTokens, c) {
-                    tokens = append(tokens, Token{string(c), 
+					//fmt.Printf(" char - DEFAULT_STATE - i = %d \n", i)
+                    tokens = append(tokens, Token{string(c),
                                         tokenTypes[strings.IndexRune(charTokens, c)]})  
                 } else if unicode.IsLetter(c) {
+					//fmt.Printf(" letter - DEFAULT_STATE - i = %d \n", i)
                     token += string(c)
                     state = WORD_STATE
                 } else if unicode.IsDigit(c) {
+					//fmt.Printf(" digit - DEFAULT_STATE - i = %d \n", i)
                     token += string(c)
                     state = NUMBER_STATE
                 } else if c == '"' { //a start of a string since we have a quote
+					//fmt.Printf(" quote - DEFAULT_STATE - i = %d \n", i)
                     state = STRING_STATE
                 } else if c == '\'' { // a comment starts with '
+					//fmt.Printf(" comment - DEFAULT_STATE - i = %d \n", i)
                     state = COMMENT_STATE       
                 }
                 break
@@ -130,12 +135,15 @@ func tokenize(source string) []Token {
                     unicode.Digit,
                 }
                 if unicode.IsOneOf(_LETTER_OR_DIGIT, c) {
+					//fmt.Printf(" digit or letter - WORD_STATE - i = %d \n", i)
                     token += string(c)
                 } else if c == ':' {
+					//fmt.Printf(" end label - WORD_STATE - i = %d \n", i)
                     tokens = append(tokens, Token{token, LABEL})
                     token = ""  
                     state = DEFAULT_STATE
-                } else { //another token that can be added to a word -> marks end of word 
+                } else { //another token that can be added to a word -> marks end of word
+					//fmt.Printf(" other token - WORD_STATE - i = %d \n", i)
                     tokens = append(tokens, Token{token, WORD})
                     token = ""
                     state = DEFAULT_STATE
@@ -149,31 +157,38 @@ func tokenize(source string) []Token {
                 // To get a floating point, divide.
                 //TODO: improve this by adding them 
                 if unicode.IsDigit(c) {
+					//fmt.Printf(" digit - NUMBER_STATE - i = %d \n", i)
                     token += string(c)  
                 } else {
+					//fmt.Printf(" other token - NUMBER_STATE - i = %d \n", i)
                     tokens = append(tokens, Token{token, NUMBER})
                     token = ""
                     state = DEFAULT_STATE
-                    i--; // Reprocess this character in the default state.
+                    i-- // Reprocess this character in the default state.
                 }
                 break
             case STRING_STATE:
                 if c == '"' { //end of string
+					//fmt.Printf(" end quote - STRING_STATE - i = %d \n", i)
                     tokens = append(tokens, Token{token, STRING})
                     token = ""
                     state = DEFAULT_STATE
                 } else {
+					//fmt.Printf(" other token - STRING_STATE - i = %d \n", i)
                     token += string(c)
                 }
                 break
-            case COMMENT_STATE:
-                if c == '\n' { //end of comment 
+		case COMMENT_STATE:
+				//fmt.Printf(" COMMENT_STATE ")
+                if c == '\n' { //end of comment
+					//fmt.Printf(" end of comment - COMMENT_STATE - i = %d \n", i)
                     state = DEFAULT_STATE
                 }   
                 break               
         }
     }
-	//fmt.Println(" end of tokenize loop ")
+	//fmt.Println(" tokens at the end of tokenize ")
+	//fmt.Println(tokens)
     return tokens
 }
 
@@ -236,14 +251,16 @@ type Parser struct {
  * grammar syntax until we run out of code to parse.
  *
  */
-func (p *Parser) parse(labels map[string]int) []Statement {
+func (p *Parser) parse(labels *map[string]int) []Statement {
     var statements []Statement
     for { //adding i temp here
         for p.matchByType(LINE) {} // Ignore empty lines. //not sure this is the construct i shld be using
 
         if p.matchByType(LABEL) {
 			//fmt.Printf(" parsing a label \n")
-			labels[p.last(1).text] = len(statements) //mark the index of the statement after the label
+			textLabel := p.last(1).text
+			(*labels)[textLabel] = len(statements) //mark the index of the statement after the label
+			//fmt.Printf(" label text = %s and its stmt nb = %d \n", textLabel, len(statements))
         } else if p.matchByMultipleTypes(WORD, EQUALS) {
 			//fmt.Printf(" parsing a word & equals \n")
             name := p.last(2).text 
@@ -269,8 +286,12 @@ func (p *Parser) parse(labels map[string]int) []Statement {
 			break
 		}
     }
-	//fmt.Println(" statements at the end of parse : ")
-	//fmt.Println(statements)
+	/*fmt.Println(" statements at the end of parse : ")
+	fmt.Println(statements)
+
+	fmt.Println(" labels at the end of parse size =  ", len(*labels))
+	fmt.Println(*labels)*/
+
 	return statements
 }
 
@@ -282,14 +303,14 @@ func (p *Parser) parse(labels map[string]int) []Statement {
  */
 func (p *Parser) consumeByType(type1 TokenType) Token {
 	if p.get(0).tokenType != type1 {
-		//throw new Error("Expected " + type + ".")
 		panic(" Expected "+ string(type1) + ".")
 	}
+	t := p.tokens[p.position]
 	p.position++
-	return p.tokens[p.position]
+	return t
 }
 
-func (p Parser) consumeByName(name string) Token {
+func (p *Parser) consumeByName(name string) Token {
 	if !p.matchByName(name) {
 		panic("Expected " + name + ".")
 	}
@@ -362,7 +383,7 @@ func (p Parser) get(offset int) Token {
 }
 
 // these functions each represent one grammatical part of the language. 
-func (p Parser) expression() Expression {
+func (p *Parser) expression() Expression {
     return p.operator()
 }
 
@@ -386,12 +407,13 @@ func (p Parser) expression() Expression {
  * 7. Build a ((1 + 2) * 3) expression and replace (1 + 2) with it.
  * 8. Return the last expression built.
  **/
-func (p Parser) operator() Expression {
+func (p *Parser) operator() Expression {
     expression := p.atomic()
 	//fmt.Println(" operator exp ", expression.evaluate())
     // Keep building operator expressions as long as we have operators.
     for p.matchByType(OPERATOR) || p.matchByType(EQUALS) {
-		operator := rune(p.last(1).text[1]) //not sure that this will get me equivalent to charAt(0)
+		operator := rune(p.last(1).text[0]) //not sure that this will get me equivalent to charAt(0)
+		//fmt.Printf(" rune operator = %s \n", operator)
 		right := p.atomic()
 		expression = OperatorExpression{expression, operator, right}
 	}
@@ -403,16 +425,21 @@ func (p Parser) operator() Expression {
  * precedence and contains single literal tokens like 123 and "foo", as
  * well as parenthesized expressions. 
  **/
-func (p Parser) atomic() Expression {
+func (p *Parser) atomic() Expression {
 	if p.matchByType(WORD) {
+		//fmt.Printf(" type WORD -> VariableExp ")
 		return VariableExpression{p.last(1).text}
 	} else if p.matchByType(NUMBER) {
+		//fmt.Printf(" type NUMBER -> parsed NumberValue ")
 		if val, err := strconv.ParseFloat(p.last(1).text, 64); err == nil {
+			//fmt.Printf(" val = %d ", val)
 			return NumberValue{val}
 		}
 	} else if p.matchByType(STRING) {
+		//fmt.Printf(" type STRING -> parsed StringValue ")
 		return StringValue{p.last(1).text}
 	} else if p.matchByType(LEFT_PAREN) {
+		//fmt.Printf(" type LEFT_PAREN -> parsed expression ")
 		expression := p.expression()
 		p.consumeByType(RIGHT_PAREN)
 		return expression
@@ -529,7 +556,11 @@ type IfThenStatement struct {
 }
 
 func (gs GotoStatement) execute() {
+	/*fmt.Printf(" execute of GotoStmt gBasic labels : ")
+	fmt.Println(gBasic.labels)
+	fmt.Println(gs)*/
 	if val, ok := gBasic.labels[gs.label]; ok {
+		//fmt.Printf(" Goto statement val = %d and ok = %d ", val, ok)
 		gBasic.currentStatement = val
 	}
 }
