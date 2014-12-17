@@ -31,7 +31,7 @@ type Gbasic struct {
     variables map[string]Value 
     labels map[string]int
 	currentStatement int
-	lineInScanner bufio.Scanner
+	lineInScanner *bufio.Scanner
 }
 
 func NewGbasic() *Gbasic {
@@ -45,7 +45,6 @@ func NewGbasic() *Gbasic {
 var gBasic *Gbasic
 
 func (g *Gbasic) interpret(src string) {
-    fmt.Println(" Start interpreting ............... ")
     //Tokens []*token.Token tokenize(src)
     tokens := tokenize(src)
 
@@ -55,11 +54,13 @@ func (g *Gbasic) interpret(src string) {
 
 	//Interpret all statement until we're done
 	g.currentStatement = 0
+	//fmt.Printf(" in interpret after parsing statements are of size = %d ", len(statements))
 	for g.currentStatement < len(statements) {
 		thisStatement := g.currentStatement
 		g.currentStatement++
 		statements[thisStatement].execute()
 	}
+	//fmt.Println(" end of interpret execute statement loop ")
 }
 
 
@@ -102,7 +103,9 @@ func tokenize(source string) []Token {
         OPERATOR, OPERATOR, OPERATOR,
         LEFT_PAREN, RIGHT_PAREN}        
 
-    for i, c := range source {
+	for i := 0; i < len(source); i++ {
+		c := rune(source[i])
+		//fmt.Printf(" in source range for loop current i = %d \n", i)
         switch (state) {
             case DEFAULT_STATE:
                 //check if c is in charTokens   
@@ -136,7 +139,8 @@ func tokenize(source string) []Token {
                     tokens = append(tokens, Token{token, WORD})
                     token = ""
                     state = DEFAULT_STATE
-                    i-- 
+                    i--
+					//fmt.Printf("decrementing i -> range shld go back one step behind i = %d \n ", i)
                 }
                 break
             case NUMBER_STATE:
@@ -169,6 +173,7 @@ func tokenize(source string) []Token {
                 break               
         }
     }
+	//fmt.Println(" end of tokenize loop ")
     return tokens
 }
 
@@ -231,32 +236,41 @@ type Parser struct {
  * grammar syntax until we run out of code to parse.
  *
  */
-func (p Parser) parse(labels map[string]int) []Statement {
-    var statements []Statement 
-    for {
-        for p.matchByType(LINE) {} // Ignore empty lines. //not sure this is the construct i shld be using 
+func (p *Parser) parse(labels map[string]int) []Statement {
+    var statements []Statement
+    for { //adding i temp here
+        for p.matchByType(LINE) {} // Ignore empty lines. //not sure this is the construct i shld be using
 
         if p.matchByType(LABEL) {
-            labels[p.last(1).text] = len(statements) //mark the index of the statement after the label    
+			//fmt.Printf(" parsing a label \n")
+			labels[p.last(1).text] = len(statements) //mark the index of the statement after the label
         } else if p.matchByMultipleTypes(WORD, EQUALS) {
+			//fmt.Printf(" parsing a word & equals \n")
             name := p.last(2).text 
             value := p.expression()
             statements = append(statements, AssignmentStatement{name, value})
         } else if p.matchByName("print") {
-			statements = statements.append(PrintStatement{p.expression()})
+			//fmt.Printf(" parsing a print \n")
+			statements = append(statements, PrintStatement{p.expression()})
 		} else if p.matchByName("input") {
-			statements = statements.append(InputStatement{p.consume(WORD).text})
+			//fmt.Printf(" parsing input \n")
+			statements = append(statements, InputStatement{p.consumeByType(WORD).text})
 		} else if p.matchByName("goto") {
-			statements = statements.append(GotoStatement{p.consume(WORD).text})
+			//fmt.Printf(" parsing goto \n ")
+			statements = append(statements, GotoStatement{p.consumeByType(WORD).text})
 		} else if p.matchByName("if") {
+			//fmt.Printf(" parsing if \n")
 			condition := p.expression()
 			p.consumeByName("then")
 			label := p.consumeByType(WORD).text
-			statements = statements.append(IfThenStatement{condition, label})
+			statements = append(statements, IfThenStatement{condition, label})
 		} else {
+			//fmt.Println(" shld break now out of parse's for loop")
 			break
 		}
     }
+	//fmt.Println(" statements at the end of parse : ")
+	//fmt.Println(statements)
 	return statements
 }
 
@@ -266,17 +280,17 @@ func (p Parser) parse(labels map[string]int) []Statement {
  * certain type in a certain position, for example a matching ) after
  * an opening (.
  */
-func (p Parser) consumeByType(type1 TokenType) Token {
+func (p *Parser) consumeByType(type1 TokenType) Token {
 	if p.get(0).tokenType != type1 {
 		//throw new Error("Expected " + type + ".")
-		panic(" Expected "+ type1 + ".")
+		panic(" Expected "+ string(type1) + ".")
 	}
 	p.position++
-	return p.tokens.get(p.position)
+	return p.tokens[p.position]
 }
 
 func (p Parser) consumeByName(name string) Token {
-	if !p.match(name) {
+	if !p.matchByName(name) {
 		panic("Expected " + name + ".")
 	}
 	return p.last(1)
@@ -285,7 +299,7 @@ func (p Parser) consumeByName(name string) Token {
 /**
  * Consumes the next token if it's a word token with the given name.
  */
-func (p Parser) matchByName(name string) bool {
+func (p *Parser) matchByName(name string) bool {
     if p.get(0).tokenType != WORD {
         return false
     }
@@ -300,7 +314,7 @@ func (p Parser) matchByName(name string) bool {
  * Consumes the next two tokens if they are the given type (in order).
  * Consumes no tokens if either check fais.
  */
- func (p Parser) matchByMultipleTypes(type1 TokenType, type2 TokenType) bool {
+ func (p *Parser) matchByMultipleTypes(type1 TokenType, type2 TokenType) bool {
     if p.get(0).tokenType != type1 {
         return false
     }
@@ -314,7 +328,7 @@ func (p Parser) matchByName(name string) bool {
 /**
  * Consumes the next token if it's the given type.
  **/
-func (p Parser) matchByType(type1 TokenType) bool {
+func (p *Parser) matchByType(type1 TokenType) bool {
     if p.get(0).tokenType != type1 {
         return false
     }
@@ -327,7 +341,13 @@ func (p Parser) matchByType(type1 TokenType) bool {
  * be the token just consumed, last(2) the one before that, etc.
  */
  func (p Parser) last(offset int) Token {
-    return p.tokens[p.position - offset]
+	 /*fmt.Printf(" calling last with offset %d , and current position is %d "+
+			  " tokens size : %d + tokens : \n", offset, p.position, len(p.tokens));
+	 fmt.Println(p.tokens)*/
+	 if p.position - offset >= 0 {
+	 	return p.tokens[p.position - offset]
+	 }
+	 return p.tokens[0]
  }  
 
 /**
@@ -368,10 +388,10 @@ func (p Parser) expression() Expression {
  **/
 func (p Parser) operator() Expression {
     expression := p.atomic()
-
+	//fmt.Println(" operator exp ", expression.evaluate())
     // Keep building operator expressions as long as we have operators.
     for p.matchByType(OPERATOR) || p.matchByType(EQUALS) {
-		operator := p.last(1).text[1] //not sure that this will get me equivalent to charAt(0)
+		operator := rune(p.last(1).text[1]) //not sure that this will get me equivalent to charAt(0)
 		right := p.atomic()
 		expression = OperatorExpression{expression, operator, right}
 	}
@@ -387,7 +407,9 @@ func (p Parser) atomic() Expression {
 	if p.matchByType(WORD) {
 		return VariableExpression{p.last(1).text}
 	} else if p.matchByType(NUMBER) {
-		return NumberValue{strconv.ParseFloat(p.last(1).text, 64)}
+		if val, err := strconv.ParseFloat(p.last(1).text, 64); err == nil {
+			return NumberValue{val}
+		}
 	} else if p.matchByType(STRING) {
 		return StringValue{p.last(1).text}
 	} else if p.matchByType(LEFT_PAREN) {
@@ -425,15 +447,15 @@ func (oe OperatorExpression) evaluate() Value {
 		// Addition if the left argument is a number, otherwise do
 		// string concatenation.
 		if _, ok := leftVal.(NumberValue); ok {
-			return NumberValue{leftVal.toNumber() +  rightVal.toNumber()}
+			return NumberValue{leftVal.toNumber() + rightVal.toNumber()}
 		} else {
-			return NumberValue{leftVal.toString() +  rightVal.toString()}
+			return StringValue{leftVal.toString() + rightVal.toString()}
 		}
 	case '-':
 		return NumberValue{leftVal.toNumber() - rightVal.toNumber()}
 	case '*':
 		return NumberValue{leftVal.toNumber() * rightVal.toNumber()}
-	case '\':
+	case '/':
 		return NumberValue{leftVal.toNumber() / rightVal.toNumber()}
 	case '<':
 		//compare depending on the type
@@ -489,6 +511,7 @@ type PrintStatement struct {
 }
 
 func (ps PrintStatement) execute() {
+	//fmt.Println(" print statement execuate called and shld print this : %s "+ ps.expression.evaluate().toString())
 	fmt.Println(ps.expression.evaluate().toString())
 }
 
@@ -573,7 +596,7 @@ type VariableExpression struct {
 }
 
 func (ve VariableExpression) evaluate() Value {
-	if ok, val := gBasic.variables[ve.name]; ok {
+	if  val, ok := gBasic.variables[ve.name]; ok {
 		return val
 	}
 	return NumberValue{0} //not sure to by default return nb 0 ?
